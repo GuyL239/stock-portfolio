@@ -27,21 +27,22 @@ export async function POST(request: NextRequest) {
     ? body.tickers.filter((t: unknown): t is string => typeof t === "string" && t.trim().length > 0)
     : [];
 
-  if (tickers.length === 0) {
-    return NextResponse.json({ error: "No tickers provided" }, { status: 400 });
-  }
-
   const uniqueTickers = [...new Set(tickers)];
 
-  const quotes = await Promise.all(uniqueTickers.map((ticker) => fetchQuote(ticker)));
+  const [stockQuotes, ilsQuote] = await Promise.all([
+    Promise.all(uniqueTickers.map((ticker) => fetchQuote(ticker))),
+    fetchQuote("ILS=X"),
+  ]);
 
   const prices: Record<string, number> = {};
-  quotes.forEach((quote, i) => {
+  stockQuotes.forEach((quote, i) => {
     const ticker = uniqueTickers[i];
     if (quote && typeof quote.regularMarketPrice === "number") {
       prices[ticker] = quote.regularMarketPrice;
     }
   });
 
-  return NextResponse.json(prices);
+  const ilsRate = typeof ilsQuote?.regularMarketPrice === "number" ? ilsQuote.regularMarketPrice : null;
+
+  return NextResponse.json({ prices, ilsRate });
 }
