@@ -54,10 +54,24 @@ type TradeRow = {
   trade_date: string;
 };
 
-type SortKey = "ticker" | "shares" | "avg_price" | "current_price" | "pnl" | "stop_loss" | "investment_ils";
+type QuoteInfo = {
+  currency: string;
+  exchange: string;
+};
+
+type SortKey =
+  | "ticker"
+  | "shares"
+  | "avg_price"
+  | "current_price"
+  | "pnl"
+  | "stop_loss"
+  | "investment_ils"
+  | "current_value";
 type SortDir = "asc" | "desc";
 
 type DeleteTarget = { id: string; ticker: string };
+type DeleteTradeTarget = { id: string; ticker: string };
 
 type StopLossStatus = {
   key: "breached" | "close" | "safe";
@@ -80,6 +94,14 @@ type TradeFormValues = {
   price: string;
 };
 
+type TradeEditFormValues = {
+  ticker: string;
+  actionType: TradeActionType;
+  shares: string;
+  pricePerShare: string;
+  realizedPnl: string;
+};
+
 const EMPTY_FORM: PositionFormValues = {
   ticker: "",
   shares: "",
@@ -90,16 +112,24 @@ const EMPTY_FORM: PositionFormValues = {
 
 const EMPTY_TRADE_FORM: TradeFormValues = { shares: "", price: "" };
 
-const FIELD_CONFIG: Record<FieldKey, { label: string; placeholder: string; type: "text" | "number" }> = {
-  ticker: { label: "סימול", placeholder: "NVDA", type: "text" },
-  shares: { label: "כמות", placeholder: "10", type: "number" },
-  avgPrice: { label: "שער כניסה", placeholder: "100.00", type: "number" },
-  currentPrice: { label: "מחיר נוכחי", placeholder: "110.00", type: "number" },
-  stopLoss: { label: "סטופ לוס", placeholder: "90.00", type: "number" },
+const EMPTY_TRADE_EDIT_FORM: TradeEditFormValues = {
+  ticker: "",
+  actionType: "buy",
+  shares: "",
+  pricePerShare: "",
+  realizedPnl: "",
 };
 
 const ADD_FIELDS: FieldKey[] = ["ticker", "shares", "avgPrice", "stopLoss"];
 const EDIT_FIELDS: FieldKey[] = ["ticker", "shares", "avgPrice", "currentPrice", "stopLoss"];
+
+function isIlsTicker(ticker: string): boolean {
+  return ticker.trim().toUpperCase().endsWith(".TA");
+}
+
+function currencySymbol(ticker: string): string {
+  return isIlsTicker(ticker) ? "₪" : "$";
+}
 
 function mapRow(row: PositionRow): Position {
   return {
@@ -151,16 +181,6 @@ function validateForm(form: PositionFormValues, opts: { checkCurrentPrice?: bool
   return "";
 }
 
-const SORT_COLUMNS: { key: SortKey; label: string; widthClass: string }[] = [
-  { key: "ticker", label: "סימול", widthClass: "w-[9%]" },
-  { key: "shares", label: "כמות", widthClass: "w-[5%]" },
-  { key: "avg_price", label: "שער כניסה", widthClass: "w-[9%]" },
-  { key: "current_price", label: "מחיר נוכחי", widthClass: "w-[9%]" },
-  { key: "pnl", label: "רווח/הפסד", widthClass: "w-[20%]" },
-  { key: "stop_loss", label: "מחיר סטופ לוס", widthClass: "w-[10%]" },
-  { key: "investment_ils", label: "סה״כ השקעה (₪)", widthClass: "w-[14%]" },
-];
-
 function PositionFields({
   values,
   onChange,
@@ -174,10 +194,18 @@ function PositionFields({
 }) {
   const inputClass =
     "w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-500 disabled:opacity-50";
+  const symbol = currencySymbol(values.ticker || "");
+  const config: Record<FieldKey, { label: string; placeholder: string; type: "text" | "number" }> = {
+    ticker: { label: "סימול", placeholder: "NVDA", type: "text" },
+    shares: { label: "כמות", placeholder: "10", type: "number" },
+    avgPrice: { label: `שער כניסה (${symbol})`, placeholder: "100.00", type: "number" },
+    currentPrice: { label: `מחיר נוכחי (${symbol})`, placeholder: "110.00", type: "number" },
+    stopLoss: { label: `סטופ לוס (${symbol})`, placeholder: "90.00", type: "number" },
+  };
   return (
     <div className="mb-3.5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
       {fields.map((key) => {
-        const cfg = FIELD_CONFIG[key];
+        const cfg = config[key];
         return (
           <div key={key}>
             <div className="mb-1.5 text-xs text-slate-400">{cfg.label}</div>
@@ -202,18 +230,36 @@ function TradeFields({
   onChange,
   disabled,
   priceLabel,
+  maxShares,
+  onFillMax,
+  maxButtonLabel,
 }: {
   values: TradeFormValues;
   onChange: (patch: Partial<TradeFormValues>) => void;
   disabled: boolean;
   priceLabel: string;
+  maxShares?: number;
+  onFillMax?: () => void;
+  maxButtonLabel?: string;
 }) {
   const inputClass =
     "w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-500 disabled:opacity-50";
   return (
     <div className="mb-3.5 grid grid-cols-2 gap-3">
       <div>
-        <div className="mb-1.5 text-xs text-slate-400">כמות</div>
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="text-xs text-slate-400">כמות</span>
+          {onFillMax && (
+            <button
+              type="button"
+              onClick={onFillMax}
+              disabled={disabled}
+              className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 disabled:opacity-50"
+            >
+              {maxButtonLabel ?? `מקסימום (${maxShares})`}
+            </button>
+          )}
+        </div>
         <input
           type="number"
           value={values.shares}
@@ -240,12 +286,38 @@ function TradeFields({
   );
 }
 
+function SortableTh({
+  sortKey,
+  label,
+  widthClass,
+  activeKey,
+  dir,
+  onSort,
+}: {
+  sortKey: SortKey;
+  label: string;
+  widthClass: string;
+  activeKey: SortKey | null;
+  dir: SortDir;
+  onSort: (key: SortKey) => void;
+}) {
+  return (
+    <th
+      onClick={() => onSort(sortKey)}
+      className={`select-none px-3 py-3.5 text-right text-[13px] font-medium text-slate-400 cursor-pointer ${widthClass}`}
+    >
+      {label} <span className="text-[11px] text-slate-500">{activeKey === sortKey ? (dir === "asc" ? "▲" : "▼") : ""}</span>
+    </th>
+  );
+}
+
 export default function Dashboard() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
   const [ilsRate, setIlsRate] = useState<number | null>(null);
+  const [quoteInfo, setQuoteInfo] = useState<Record<string, QuoteInfo>>({});
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
@@ -281,6 +353,15 @@ export default function Dashboard() {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [isLoadingTrades, setIsLoadingTrades] = useState(true);
   const [tradeLoadError, setTradeLoadError] = useState("");
+
+  const [editTradeTarget, setEditTradeTarget] = useState<Trade | null>(null);
+  const [editTradeForm, setEditTradeForm] = useState<TradeEditFormValues>(EMPTY_TRADE_EDIT_FORM);
+  const [editTradeError, setEditTradeError] = useState("");
+  const [isSavingEditTrade, setIsSavingEditTrade] = useState(false);
+
+  const [deleteTradeTarget, setDeleteTradeTarget] = useState<DeleteTradeTarget | null>(null);
+  const [deleteTradeError, setDeleteTradeError] = useState("");
+  const [isDeletingTrade, setIsDeletingTrade] = useState(false);
 
   const toggleForm = () => {
     setShowForm((v) => !v);
@@ -524,14 +605,111 @@ export default function Dashboard() {
     setSellTarget(null);
   };
 
+  const openEditTrade = (trade: Trade) => {
+    setEditTradeTarget(trade);
+    setEditTradeForm({
+      ticker: trade.ticker,
+      actionType: trade.action_type,
+      shares: String(trade.shares),
+      pricePerShare: String(trade.price_per_share),
+      realizedPnl: trade.realized_pnl === null ? "" : String(trade.realized_pnl),
+    });
+    setEditTradeError("");
+  };
+  const cancelEditTrade = () => {
+    setEditTradeTarget(null);
+    setEditTradeError("");
+  };
+  const saveEditTrade = async () => {
+    if (!editTradeTarget) return;
+    const ticker = editTradeForm.ticker.trim().toUpperCase();
+    const shares = parseFloat(editTradeForm.shares);
+    const price = parseFloat(editTradeForm.pricePerShare);
+    if (!ticker) return setEditTradeError("יש להזין סימול");
+    if (!(shares > 0)) return setEditTradeError("כמות חייבת להיות מספר חיובי");
+    if (!(price > 0)) return setEditTradeError("מחיר חייב להיות מספר חיובי");
+
+    let realizedPnl: number | null = null;
+    if (editTradeForm.actionType === "sell") {
+      const parsed = parseFloat(editTradeForm.realizedPnl);
+      if (Number.isNaN(parsed)) return setEditTradeError("יש להזין רווח/הפסד ממומש תקין");
+      realizedPnl = parsed;
+    }
+
+    setIsSavingEditTrade(true);
+    setEditTradeError("");
+    const { data, error } = await supabase
+      .from("trade_history")
+      .update({
+        ticker,
+        action_type: editTradeForm.actionType,
+        shares,
+        price_per_share: price,
+        realized_pnl: realizedPnl,
+      })
+      .eq("id", editTradeTarget.id)
+      .select()
+      .single();
+    setIsSavingEditTrade(false);
+
+    if (error || !data) {
+      setEditTradeError(error?.message ?? "עדכון העסקה נכשל");
+      return;
+    }
+
+    const updated = mapTradeRow(data);
+    setTrades((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    setEditTradeTarget(null);
+  };
+
+  const requestDeleteTrade = (id: string, ticker: string) => {
+    setDeleteTradeError("");
+    setDeleteTradeTarget({ id, ticker });
+  };
+  const cancelDeleteTrade = () => {
+    setDeleteTradeTarget(null);
+    setDeleteTradeError("");
+  };
+  const confirmDeleteTrade = async () => {
+    if (!deleteTradeTarget) return;
+    setIsDeletingTrade(true);
+    setDeleteTradeError("");
+    const { error } = await supabase.from("trade_history").delete().eq("id", deleteTradeTarget.id);
+    setIsDeletingTrade(false);
+
+    if (error) {
+      setDeleteTradeError(error.message);
+      return;
+    }
+    setTrades((prev) => prev.filter((t) => t.id !== deleteTradeTarget.id));
+    setDeleteTradeTarget(null);
+  };
+
   const totals = useMemo(() => {
-    const totalValue = positions.reduce((acc, p) => acc + p.current_price * p.shares, 0);
-    const totalCost = positions.reduce((acc, p) => acc + p.avg_price * p.shares, 0);
-    const totalPnL = totalValue - totalCost;
-    const totalPnLPercent = totalCost > 0 ? ((totalPnL / totalCost) * 100).toFixed(2) : "0.00";
+    let totalValueUsd = 0;
+    let totalValueIls = 0;
+    let totalCostUsd = 0;
+
+    positions.forEach((p) => {
+      const rawValue = p.shares * p.current_price;
+      const rawCost = p.shares * p.avg_price;
+
+      if (isIlsTicker(p.ticker)) {
+        totalValueIls += rawValue;
+        totalValueUsd += ilsRate ? rawValue / ilsRate : 0;
+        totalCostUsd += ilsRate ? rawCost / ilsRate : 0;
+      } else {
+        totalValueUsd += rawValue;
+        totalValueIls += ilsRate ? rawValue * ilsRate : 0;
+        totalCostUsd += rawCost;
+      }
+    });
+
+    const totalPnL = totalValueUsd - totalCostUsd;
+    const totalPnLPercent = totalCostUsd > 0 ? ((totalPnL / totalCostUsd) * 100).toFixed(2) : "0.00";
     const pnlPositive = totalPnL >= 0;
-    return { totalValue, totalPnL, totalPnLPercent, pnlPositive };
-  }, [positions]);
+    return { totalValueUsd, totalValueIls, totalPnL, totalPnLPercent, pnlPositive };
+  }, [positions, ilsRate]);
 
   const filteredPositions = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -541,9 +719,16 @@ export default function Dashboard() {
     if (sortKey) {
       sorted.sort((a, b) => {
         const val = (p: Position) => {
-          if (sortKey === "pnl") return (p.current_price - p.avg_price) * p.shares;
-          if (sortKey === "investment_ils") return p.shares * p.avg_price * (ilsRate ?? 0);
-          return p[sortKey];
+          switch (sortKey) {
+            case "pnl":
+              return (p.current_price - p.avg_price) * p.shares;
+            case "investment_ils":
+              return isIlsTicker(p.ticker) ? p.shares * p.avg_price : p.shares * p.avg_price * (ilsRate ?? 0);
+            case "current_value":
+              return p.shares * p.current_price;
+            default:
+              return p[sortKey];
+          }
         };
         const av = val(a);
         const bv = val(b);
@@ -557,7 +742,6 @@ export default function Dashboard() {
   }, [positions, searchQuery, sortKey, sortDir, ilsRate]);
 
   const noResults = searchQuery.trim().length > 0 && filteredPositions.length === 0;
-  const sortArrow = (key: SortKey) => (sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "");
 
   const refreshPrices = async (targetsOverride?: Position[]) => {
     const targets = targetsOverride ?? filteredPositions;
@@ -572,18 +756,29 @@ export default function Dashboard() {
         body: JSON.stringify({ tickers }),
       });
       if (!res.ok) throw new Error("שגיאה בקבלת מחירים מהשרת");
-      const { prices, ilsRate: rate }: { prices: Record<string, number>; ilsRate: number | null } =
+      const {
+        quotes,
+        ilsRate: rate,
+      }: { quotes: Record<string, { price: number; currency: string; exchange: string }>; ilsRate: number | null } =
         await res.json();
 
       if (typeof rate === "number") setIlsRate(rate);
 
       setPositions((prev) =>
-        prev.map((p) => (prices[p.ticker] !== undefined ? { ...p, current_price: prices[p.ticker] } : p))
+        prev.map((p) => (quotes[p.ticker] ? { ...p, current_price: quotes[p.ticker].price } : p))
       );
 
+      setQuoteInfo((prev) => {
+        const next = { ...prev };
+        Object.entries(quotes).forEach(([ticker, q]) => {
+          next[ticker] = { currency: q.currency, exchange: q.exchange };
+        });
+        return next;
+      });
+
       const updates = targets
-        .filter((p) => prices[p.ticker] !== undefined)
-        .map((p) => supabase.from("positions").update({ current_price: prices[p.ticker] }).eq("id", p.id));
+        .filter((p) => quotes[p.ticker])
+        .map((p) => supabase.from("positions").update({ current_price: quotes[p.ticker].price }).eq("id", p.id));
 
       Promise.all(updates).then((results) => {
         if (results.some((r) => r.error)) {
@@ -597,7 +792,16 @@ export default function Dashboard() {
     }
   };
 
-  const realizedPnlTotal = useMemo(() => trades.reduce((acc, t) => acc + (t.realized_pnl ?? 0), 0), [trades]);
+  const realizedPnlTotals = useMemo(() => {
+    let usd = 0;
+    let ils = 0;
+    trades.forEach((t) => {
+      if (t.realized_pnl === null) return;
+      if (isIlsTicker(t.ticker)) ils += t.realized_pnl;
+      else usd += t.realized_pnl;
+    });
+    return { usd, ils };
+  }, [trades]);
 
   useEffect(() => {
     let cancelled = false;
@@ -657,7 +861,7 @@ export default function Dashboard() {
 
   return (
     <div dir="rtl" className="min-h-screen bg-slate-900 text-slate-100 px-4 py-8 sm:px-6">
-      <div className="mx-auto flex max-w-5xl flex-col gap-6">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6">
         {/* Header */}
         <div className="mb-2 flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -669,11 +873,11 @@ export default function Dashboard() {
             <div className="mb-1 text-[13px] text-slate-400">שווי תיק כולל</div>
             <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <div dir="ltr" className="text-3xl font-bold text-white">
-                ${money(totals.totalValue)}
+                ${money(totals.totalValueUsd)}
               </div>
               {ilsRate !== null && (
                 <div dir="ltr" className="text-lg font-semibold text-slate-300">
-                  ₪{money(totals.totalValue * ilsRate)}
+                  ₪{money(totals.totalValueIls)}
                 </div>
               )}
             </div>
@@ -759,6 +963,9 @@ export default function Dashboard() {
               disabled={isAdding}
               fields={ADD_FIELDS}
             />
+            <div className="mb-3 text-[11px] text-slate-500">
+              עבור מניות תל אביב, הזן סימול המסתיים ב-.TA (למשל ENLT.TA) והזן מחירים בשקלים
+            </div>
             {addError && <div className="mb-3 text-[13px] text-red-400">{addError}</div>}
             <div className="flex gap-2.5">
               <button
@@ -781,62 +988,73 @@ export default function Dashboard() {
 
         {/* Table */}
         <div className="overflow-x-auto rounded-2xl border border-slate-700 bg-slate-800 shadow-xl shadow-black/25">
-          <table className="w-full min-w-[860px] table-fixed border-collapse">
+          <table className="w-full min-w-[1080px] table-fixed border-collapse">
             <thead>
               <tr className="border-b border-slate-700 bg-slate-900/50">
-                {SORT_COLUMNS.map((col) => (
-                  <th
-                    key={col.key}
-                    onClick={() => toggleSort(col.key)}
-                    className={`select-none px-4 py-3.5 text-right text-[13px] font-medium text-slate-400 cursor-pointer ${col.widthClass}`}
-                  >
-                    {col.label} <span className="text-[11px] text-slate-500">{sortArrow(col.key)}</span>
-                  </th>
-                ))}
-                <th className="w-[168px] px-3 py-3.5 text-center text-[13px] font-medium text-slate-400">
-                  פעולות
-                </th>
+                <SortableTh sortKey="ticker" label="סימול" widthClass="w-[8%]" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
+                <th className="w-[7%] px-3 py-3.5 text-right text-[13px] font-medium text-slate-400">בורסה</th>
+                <SortableTh sortKey="shares" label="כמות" widthClass="w-[4%]" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
+                <SortableTh sortKey="avg_price" label="שער כניסה" widthClass="w-[8%]" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
+                <SortableTh sortKey="current_price" label="מחיר נוכחי" widthClass="w-[8%]" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
+                <SortableTh sortKey="pnl" label="רווח/הפסד" widthClass="w-[16%]" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
+                <SortableTh sortKey="stop_loss" label="מחיר סטופ לוס" widthClass="w-[9%]" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
+                <SortableTh sortKey="investment_ils" label="סה״כ השקעה (₪)" widthClass="w-[10%]" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
+                <SortableTh sortKey="current_value" label="שווי נוכחי" widthClass="w-[10%]" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
+                <th className="w-[168px] px-3 py-3.5 text-center text-[13px] font-medium text-slate-400">פעולות</th>
               </tr>
             </thead>
             <tbody>
               {isLoading && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-500">
+                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-500">
                     טוען נתונים...
                   </td>
                 </tr>
               )}
               {!isLoading && positions.length === 0 && !loadError && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-500">
+                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-500">
                     אין פוזיציות בתיק
                   </td>
                 </tr>
               )}
               {!isLoading &&
                 filteredPositions.map((pos) => {
+                  const symbol = currencySymbol(pos.ticker);
+                  const isIls = isIlsTicker(pos.ticker);
                   const pnl = (pos.current_price - pos.avg_price) * pos.shares;
                   const pnlPercent = (((pos.current_price - pos.avg_price) / pos.avg_price) * 100).toFixed(2);
                   const pnlPositive = pnl >= 0;
                   const status = getStopLossStatus(pos.current_price, pos.stop_loss);
-                  const investmentIls = ilsRate !== null ? pos.shares * pos.avg_price * ilsRate : null;
+                  const investmentIls = isIls
+                    ? pos.shares * pos.avg_price
+                    : ilsRate !== null
+                      ? pos.shares * pos.avg_price * ilsRate
+                      : null;
+                  const currentValue = pos.shares * pos.current_price;
+                  const exchange = quoteInfo[pos.ticker]?.exchange || "...";
 
                   return (
                     <tr key={pos.id} className="border-b border-slate-700/50 hover:bg-white/[0.03]">
-                      <td className="overflow-hidden text-ellipsis whitespace-nowrap px-4 py-4 text-right font-bold text-white">
+                      <td className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-4 text-right font-bold text-white">
                         {pos.ticker}
                       </td>
-                      <td className="px-4 py-4 text-right text-slate-300" dir="ltr">
+                      <td className="whitespace-nowrap px-3 py-4 text-right text-slate-400" dir="ltr">
+                        {exchange}
+                      </td>
+                      <td className="px-3 py-4 text-right text-slate-300" dir="ltr">
                         {pos.shares}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-4 text-right text-slate-300" dir="ltr">
-                        ${money(pos.avg_price)}
+                      <td className="whitespace-nowrap px-3 py-4 text-right text-slate-300" dir="ltr">
+                        {symbol}
+                        {money(pos.avg_price)}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-4 text-right font-medium text-white" dir="ltr">
-                        ${money(pos.current_price)}
+                      <td className="whitespace-nowrap px-3 py-4 text-right font-medium text-white" dir="ltr">
+                        {symbol}
+                        {money(pos.current_price)}
                       </td>
                       <td
-                        className="overflow-hidden text-ellipsis whitespace-nowrap px-4 py-4 text-right font-semibold"
+                        className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-4 text-right font-semibold"
                         style={{ color: pnlPositive ? "#34d399" : "#f87171" }}
                         dir="ltr"
                       >
@@ -847,13 +1065,14 @@ export default function Dashboard() {
                             <TrendingDown size={16} strokeWidth={2.5} className="shrink-0" />
                           )}
                           <span style={{ unicodeBidi: "isolate" }}>
-                            ${money(Math.abs(pnl))} ({pnlPositive ? "+" : ""}
+                            {symbol}
+                            {money(Math.abs(pnl))} ({pnlPositive ? "+" : ""}
                             {pnlPercent}%)
                           </span>
                         </span>
                       </td>
                       <td
-                        className="overflow-hidden text-ellipsis whitespace-nowrap px-4 py-4 text-right"
+                        className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-4 text-right"
                         dir="ltr"
                         title={status.text}
                       >
@@ -864,12 +1083,17 @@ export default function Dashboard() {
                             <AlertTriangle size={14} strokeWidth={2.5} className="shrink-0" style={{ color: status.color }} />
                           )}
                           <span className="font-semibold" style={{ color: status.color, unicodeBidi: "isolate" }}>
-                            ${money(pos.stop_loss)}
+                            {symbol}
+                            {money(pos.stop_loss)}
                           </span>
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-4 text-right text-slate-300" dir="ltr">
+                      <td className="whitespace-nowrap px-3 py-4 text-right text-slate-300" dir="ltr">
                         {investmentIls !== null ? `₪${money(investmentIls)}` : "..."}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-4 text-right text-slate-300" dir="ltr">
+                        {symbol}
+                        {money(currentValue)}
                       </td>
                       <td className="w-[168px] px-3 py-4 text-center">
                         <div className="flex flex-col items-center gap-1.5">
@@ -921,14 +1145,26 @@ export default function Dashboard() {
         <div className="flex flex-col gap-3">
           <h2 className="text-xl font-bold text-white">היסטוריית עסקאות</h2>
 
-          <div className="max-w-xs rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-xl shadow-black/25">
-            <div className="mb-1 text-[13px] text-slate-400">סה״כ רווח/הפסד ממומש</div>
-            <div
-              dir="ltr"
-              className="text-2xl font-bold"
-              style={{ color: realizedPnlTotal >= 0 ? "#34d399" : "#f87171" }}
-            >
-              {realizedPnlTotal >= 0 ? "+" : "-"}${money(Math.abs(realizedPnlTotal))}
+          <div className="flex flex-wrap gap-3">
+            <div className="min-w-[220px] rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-xl shadow-black/25">
+              <div className="mb-1 text-[13px] text-slate-400">סה״כ רווח/הפסד ממומש ($)</div>
+              <div
+                dir="ltr"
+                className="text-2xl font-bold"
+                style={{ color: realizedPnlTotals.usd >= 0 ? "#34d399" : "#f87171" }}
+              >
+                {realizedPnlTotals.usd >= 0 ? "+" : "-"}${money(Math.abs(realizedPnlTotals.usd))}
+              </div>
+            </div>
+            <div className="min-w-[220px] rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-xl shadow-black/25">
+              <div className="mb-1 text-[13px] text-slate-400">סה״כ רווח/הפסד ממומש (₪)</div>
+              <div
+                dir="ltr"
+                className="text-2xl font-bold"
+                style={{ color: realizedPnlTotals.ils >= 0 ? "#34d399" : "#f87171" }}
+              >
+                {realizedPnlTotals.ils >= 0 ? "+" : "-"}₪{money(Math.abs(realizedPnlTotals.ils))}
+              </div>
             </div>
           </div>
 
@@ -938,68 +1174,99 @@ export default function Dashboard() {
             </div>
           )}
 
+          {deleteTradeError && (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+              {deleteTradeError}
+            </div>
+          )}
+
           <div className="overflow-x-auto rounded-2xl border border-slate-700 bg-slate-800 shadow-xl shadow-black/25">
-            <table className="w-full min-w-[620px] table-fixed border-collapse">
+            <table className="w-full min-w-[700px] table-fixed border-collapse">
               <thead>
                 <tr className="border-b border-slate-700 bg-slate-900/50">
-                  <th className="w-[20%] px-4 py-3.5 text-right text-[13px] font-medium text-slate-400">תאריך</th>
-                  <th className="w-[12%] px-4 py-3.5 text-right text-[13px] font-medium text-slate-400">סימול</th>
-                  <th className="w-[12%] px-4 py-3.5 text-right text-[13px] font-medium text-slate-400">פעולה</th>
-                  <th className="w-[14%] px-4 py-3.5 text-right text-[13px] font-medium text-slate-400">כמות</th>
-                  <th className="w-[16%] px-4 py-3.5 text-right text-[13px] font-medium text-slate-400">מחיר</th>
-                  <th className="w-[26%] px-4 py-3.5 text-right text-[13px] font-medium text-slate-400">
+                  <th className="w-[18%] px-3 py-3.5 text-right text-[13px] font-medium text-slate-400">תאריך</th>
+                  <th className="w-[11%] px-3 py-3.5 text-right text-[13px] font-medium text-slate-400">סימול</th>
+                  <th className="w-[11%] px-3 py-3.5 text-right text-[13px] font-medium text-slate-400">פעולה</th>
+                  <th className="w-[12%] px-3 py-3.5 text-right text-[13px] font-medium text-slate-400">כמות</th>
+                  <th className="w-[14%] px-3 py-3.5 text-right text-[13px] font-medium text-slate-400">מחיר</th>
+                  <th className="w-[22%] px-3 py-3.5 text-right text-[13px] font-medium text-slate-400">
                     רווח/הפסד ממומש
                   </th>
+                  <th className="w-[100px] px-3 py-3.5 text-center text-[13px] font-medium text-slate-400">פעולות</th>
                 </tr>
               </thead>
               <tbody>
                 {isLoadingTrades && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">
+                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">
                       טוען היסטוריה...
                     </td>
                   </tr>
                 )}
                 {!isLoadingTrades && trades.length === 0 && !tradeLoadError && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">
+                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">
                       אין עסקאות עדיין
                     </td>
                   </tr>
                 )}
                 {!isLoadingTrades &&
-                  trades.map((t) => (
-                    <tr key={t.id} className="border-b border-slate-700/50 hover:bg-white/[0.03]">
-                      <td className="whitespace-nowrap px-4 py-3.5 text-right text-slate-300" dir="ltr">
-                        {new Date(t.trade_date).toLocaleString("he-IL")}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3.5 text-right font-bold text-white">{t.ticker}</td>
-                      <td
-                        className="whitespace-nowrap px-4 py-3.5 text-right font-semibold"
-                        style={{ color: t.action_type === "buy" ? "#34d399" : "#f87171" }}
-                      >
-                        {t.action_type === "buy" ? "קנייה" : "מכירה"}
-                      </td>
-                      <td className="px-4 py-3.5 text-right text-slate-300" dir="ltr">
-                        {t.shares}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3.5 text-right text-slate-300" dir="ltr">
-                        ${money(t.price_per_share)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3.5 text-right" dir="ltr">
-                        {t.realized_pnl === null ? (
-                          <span className="text-slate-500">—</span>
-                        ) : (
-                          <span
-                            className="font-semibold"
-                            style={{ color: t.realized_pnl >= 0 ? "#34d399" : "#f87171" }}
-                          >
-                            {t.realized_pnl >= 0 ? "+" : "-"}${money(Math.abs(t.realized_pnl))}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  trades.map((t) => {
+                    const symbol = currencySymbol(t.ticker);
+                    return (
+                      <tr key={t.id} className="border-b border-slate-700/50 hover:bg-white/[0.03]">
+                        <td className="whitespace-nowrap px-3 py-3.5 text-right text-slate-300" dir="ltr">
+                          {new Date(t.trade_date).toLocaleString("he-IL")}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3.5 text-right font-bold text-white">{t.ticker}</td>
+                        <td
+                          className="whitespace-nowrap px-3 py-3.5 text-right font-semibold"
+                          style={{ color: t.action_type === "buy" ? "#34d399" : "#f87171" }}
+                        >
+                          {t.action_type === "buy" ? "קנייה" : "מכירה"}
+                        </td>
+                        <td className="px-3 py-3.5 text-right text-slate-300" dir="ltr">
+                          {t.shares}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3.5 text-right text-slate-300" dir="ltr">
+                          {symbol}
+                          {money(t.price_per_share)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3.5 text-right" dir="ltr">
+                          {t.realized_pnl === null ? (
+                            <span className="text-slate-500">—</span>
+                          ) : (
+                            <span
+                              className="font-semibold"
+                              style={{ color: t.realized_pnl >= 0 ? "#34d399" : "#f87171" }}
+                            >
+                              {t.realized_pnl >= 0 ? "+" : "-"}
+                              {symbol}
+                              {money(Math.abs(t.realized_pnl))}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3.5 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => openEditTrade(t)}
+                              title="עריכה"
+                              className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-lg border border-slate-700 text-slate-400 hover:bg-white/10 hover:text-slate-100"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              onClick={() => requestDeleteTrade(t.id, t.ticker)}
+                              title="מחיקה"
+                              className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-lg border border-slate-700 text-slate-400 hover:border-red-400/30 hover:bg-red-500/10 hover:text-red-400"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           </div>
@@ -1083,7 +1350,7 @@ export default function Dashboard() {
               values={buyForm}
               onChange={(patch) => setBuyForm((prev) => ({ ...prev, ...patch }))}
               disabled={isSavingBuy}
-              priceLabel="מחיר קנייה"
+              priceLabel={`מחיר קנייה (${currencySymbol(buyTarget.ticker)})`}
             />
             {buyError && <div className="mb-3 text-[13px] text-red-400">{buyError}</div>}
             <div className="flex gap-2.5">
@@ -1116,7 +1383,10 @@ export default function Dashboard() {
               values={sellForm}
               onChange={(patch) => setSellForm((prev) => ({ ...prev, ...patch }))}
               disabled={isSavingSell}
-              priceLabel="מחיר מכירה"
+              priceLabel={`מחיר מכירה (${currencySymbol(sellTarget.ticker)})`}
+              maxShares={sellTarget.shares}
+              onFillMax={() => setSellForm((prev) => ({ ...prev, shares: String(sellTarget.shares) }))}
+              maxButtonLabel="מכור הכל"
             />
             {sellError && <div className="mb-3 text-[13px] text-red-400">{sellError}</div>}
             <div className="flex gap-2.5">
@@ -1130,6 +1400,126 @@ export default function Dashboard() {
               <button
                 onClick={cancelSell}
                 disabled={isSavingSell}
+                className="rounded-lg border border-slate-700 px-4.5 py-2 text-sm font-medium text-slate-400 hover:bg-white/5 disabled:opacity-50"
+              >
+                ביטול
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit trade modal */}
+      {editTradeTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-800 p-6 shadow-2xl">
+            <div className="mb-3.5 text-[15px] font-semibold text-white">עריכת עסקה</div>
+            <div className="mb-3.5 grid grid-cols-2 gap-3">
+              <div>
+                <div className="mb-1.5 text-xs text-slate-400">סימול</div>
+                <input
+                  type="text"
+                  value={editTradeForm.ticker}
+                  onChange={(e) => setEditTradeForm((p) => ({ ...p, ticker: e.target.value }))}
+                  disabled={isSavingEditTrade}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-500 disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <div className="mb-1.5 text-xs text-slate-400">פעולה</div>
+                <select
+                  value={editTradeForm.actionType}
+                  onChange={(e) =>
+                    setEditTradeForm((p) => ({ ...p, actionType: e.target.value as TradeActionType }))
+                  }
+                  disabled={isSavingEditTrade}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-500 disabled:opacity-50"
+                >
+                  <option value="buy">קנייה</option>
+                  <option value="sell">מכירה</option>
+                </select>
+              </div>
+              <div>
+                <div className="mb-1.5 text-xs text-slate-400">כמות</div>
+                <input
+                  type="number"
+                  dir="ltr"
+                  value={editTradeForm.shares}
+                  onChange={(e) => setEditTradeForm((p) => ({ ...p, shares: e.target.value }))}
+                  disabled={isSavingEditTrade}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-500 disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <div className="mb-1.5 text-xs text-slate-400">מחיר ליחידה</div>
+                <input
+                  type="number"
+                  dir="ltr"
+                  value={editTradeForm.pricePerShare}
+                  onChange={(e) => setEditTradeForm((p) => ({ ...p, pricePerShare: e.target.value }))}
+                  disabled={isSavingEditTrade}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-500 disabled:opacity-50"
+                />
+              </div>
+              {editTradeForm.actionType === "sell" && (
+                <div className="col-span-2">
+                  <div className="mb-1.5 text-xs text-slate-400">רווח/הפסד ממומש</div>
+                  <input
+                    type="number"
+                    dir="ltr"
+                    value={editTradeForm.realizedPnl}
+                    onChange={(e) => setEditTradeForm((p) => ({ ...p, realizedPnl: e.target.value }))}
+                    disabled={isSavingEditTrade}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-500 disabled:opacity-50"
+                  />
+                </div>
+              )}
+            </div>
+            {editTradeError && <div className="mb-3 text-[13px] text-red-400">{editTradeError}</div>}
+            <div className="flex gap-2.5">
+              <button
+                onClick={saveEditTrade}
+                disabled={isSavingEditTrade}
+                className="rounded-lg bg-emerald-400 px-4.5 py-2 text-sm font-bold text-slate-900 hover:bg-emerald-300 disabled:opacity-50"
+              >
+                {isSavingEditTrade ? "שומר..." : "שמור"}
+              </button>
+              <button
+                onClick={cancelEditTrade}
+                disabled={isSavingEditTrade}
+                className="rounded-lg border border-slate-700 px-4.5 py-2 text-sm font-medium text-slate-400 hover:bg-white/5 disabled:opacity-50"
+              >
+                ביטול
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete trade confirmation modal */}
+      {deleteTradeTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-800 p-6 shadow-2xl">
+            <div className="mb-3 flex items-center gap-2.5">
+              <AlertTriangle size={22} strokeWidth={2.5} className="text-red-400" />
+              <div className="text-[17px] font-bold text-white">מחיקת עסקה</div>
+            </div>
+            <div className="mb-3 text-sm leading-relaxed text-slate-300">
+              האם אתה בטוח שברצונך למחוק את עסקת{" "}
+              <span className="font-bold text-white">{deleteTradeTarget.ticker}</span> מההיסטוריה? לא ניתן לבטל
+              פעולה זו.
+            </div>
+            <div className="flex gap-2.5">
+              <button
+                onClick={confirmDeleteTrade}
+                disabled={isDeletingTrade}
+                className="rounded-lg bg-red-500 px-4.5 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:opacity-50"
+              >
+                {isDeletingTrade ? "מוחק..." : "מחק"}
+              </button>
+              <button
+                onClick={cancelDeleteTrade}
+                disabled={isDeletingTrade}
                 className="rounded-lg border border-slate-700 px-4.5 py-2 text-sm font-medium text-slate-400 hover:bg-white/5 disabled:opacity-50"
               >
                 ביטול
