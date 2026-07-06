@@ -13,6 +13,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import AnalyticsDashboard from "@/components/AnalyticsDashboard";
 
 type Position = {
   id: string;
@@ -57,6 +58,7 @@ type TradeRow = {
 type QuoteInfo = {
   currency: string;
   exchange: string;
+  sector: string;
 };
 
 type SortKey =
@@ -759,8 +761,10 @@ export default function Dashboard() {
       const {
         quotes,
         ilsRate: rate,
-      }: { quotes: Record<string, { price: number; currency: string; exchange: string }>; ilsRate: number | null } =
-        await res.json();
+      }: {
+        quotes: Record<string, { price: number; currency: string; exchange: string; sector: string }>;
+        ilsRate: number | null;
+      } = await res.json();
 
       if (typeof rate === "number") setIlsRate(rate);
 
@@ -771,7 +775,7 @@ export default function Dashboard() {
       setQuoteInfo((prev) => {
         const next = { ...prev };
         Object.entries(quotes).forEach(([ticker, q]) => {
-          next[ticker] = { currency: q.currency, exchange: q.exchange };
+          next[ticker] = { currency: q.currency, exchange: q.exchange, sector: q.sector };
         });
         return next;
       });
@@ -792,7 +796,7 @@ export default function Dashboard() {
     }
   };
 
-  const realizedPnlTotals = useMemo(() => {
+  const { combinedUsdPnl, combinedIlsPnl } = useMemo(() => {
     let totalUsdPnl = 0;
     let totalIlsPnl = 0;
     trades.forEach((t) => {
@@ -801,10 +805,18 @@ export default function Dashboard() {
       else totalUsdPnl += t.realized_pnl;
     });
 
-    const usd = totalUsdPnl + (ilsRate ? totalIlsPnl / ilsRate : 0);
-    const ils = totalIlsPnl + (ilsRate ? totalUsdPnl * ilsRate : 0);
-    return { usd, ils };
+    const combinedUsdPnl = totalUsdPnl + totalIlsPnl / (ilsRate || 1);
+    const combinedIlsPnl = totalIlsPnl + totalUsdPnl * (ilsRate || 1);
+    return { combinedUsdPnl, combinedIlsPnl };
   }, [trades, ilsRate]);
+
+  const sectorByTicker = useMemo(() => {
+    const map: Record<string, string> = {};
+    positions.forEach((p) => {
+      map[p.ticker] = quoteInfo[p.ticker]?.sector || "Unknown";
+    });
+    return map;
+  }, [positions, quoteInfo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -989,6 +1001,8 @@ export default function Dashboard() {
           </div>
         )}
 
+        <AnalyticsDashboard positions={positions} sectorByTicker={sectorByTicker} ilsRate={ilsRate} />
+
         {/* Table */}
         <div className="overflow-x-auto rounded-2xl border border-slate-700 bg-slate-800 shadow-xl shadow-black/25">
           <table className="w-full min-w-[1080px] table-fixed border-collapse">
@@ -1154,9 +1168,9 @@ export default function Dashboard() {
               <div
                 dir="ltr"
                 className="text-2xl font-bold"
-                style={{ color: realizedPnlTotals.usd >= 0 ? "#34d399" : "#f87171" }}
+                style={{ color: combinedUsdPnl >= 0 ? "#34d399" : "#f87171" }}
               >
-                {realizedPnlTotals.usd >= 0 ? "+" : "-"}${money(Math.abs(realizedPnlTotals.usd))}
+                {combinedUsdPnl >= 0 ? "+" : "-"}${money(Math.abs(combinedUsdPnl))}
               </div>
             </div>
             <div className="min-w-[220px] rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-xl shadow-black/25">
@@ -1164,9 +1178,9 @@ export default function Dashboard() {
               <div
                 dir="ltr"
                 className="text-2xl font-bold"
-                style={{ color: realizedPnlTotals.ils >= 0 ? "#34d399" : "#f87171" }}
+                style={{ color: combinedIlsPnl >= 0 ? "#34d399" : "#f87171" }}
               >
-                {realizedPnlTotals.ils >= 0 ? "+" : "-"}₪{money(Math.abs(realizedPnlTotals.ils))}
+                {combinedIlsPnl >= 0 ? "+" : "-"}₪{money(Math.abs(combinedIlsPnl))}
               </div>
             </div>
           </div>

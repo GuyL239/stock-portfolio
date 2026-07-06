@@ -10,6 +10,10 @@ type YahooQuoteLike = {
   exchange?: string;
 };
 
+type AssetProfileLike = {
+  sector?: string;
+};
+
 async function fetchQuote(ticker: string, retriesLeft = 1): Promise<YahooQuoteLike | null> {
   try {
     const quote = (await yahooFinance.quote(ticker, {}, { validateResult: false })) as
@@ -23,10 +27,26 @@ async function fetchQuote(ticker: string, retriesLeft = 1): Promise<YahooQuoteLi
   }
 }
 
+async function fetchSector(ticker: string, retriesLeft = 1): Promise<string> {
+  try {
+    const summary = (await yahooFinance.quoteSummary(
+      ticker,
+      { modules: ["assetProfile"] },
+      { validateResult: false }
+    )) as { assetProfile?: AssetProfileLike };
+    return summary?.assetProfile?.sector || "Unknown";
+  } catch (err) {
+    if (retriesLeft > 0) return fetchSector(ticker, retriesLeft - 1);
+    console.error(`Failed to fetch sector for ${ticker}:`, err);
+    return "Unknown";
+  }
+}
+
 type TickerQuote = {
   price: number;
   currency: string;
   exchange: string;
+  sector: string;
 };
 
 export async function POST(request: NextRequest) {
@@ -37,8 +57,9 @@ export async function POST(request: NextRequest) {
 
   const uniqueTickers = [...new Set(tickers)];
 
-  const [stockQuotes, ilsQuote] = await Promise.all([
+  const [stockQuotes, sectors, ilsQuote] = await Promise.all([
     Promise.all(uniqueTickers.map((ticker) => fetchQuote(ticker))),
+    Promise.all(uniqueTickers.map((ticker) => fetchSector(ticker))),
     fetchQuote("ILS=X"),
   ]);
 
@@ -53,6 +74,7 @@ export async function POST(request: NextRequest) {
         price,
         currency: quote.currency ?? (isTase ? "ILS" : "USD"),
         exchange: quote.exchange ?? "",
+        sector: sectors[i],
       };
     }
   });
