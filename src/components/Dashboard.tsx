@@ -933,6 +933,8 @@ export default function Dashboard() {
           </div>
         )}
 
+        <AnalyticsDashboard positions={positions} sectorByTicker={sectorByTicker} ilsRate={ilsRate} />
+
         {/* Controls */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
@@ -1000,8 +1002,6 @@ export default function Dashboard() {
             </div>
           </div>
         )}
-
-        <AnalyticsDashboard positions={positions} sectorByTicker={sectorByTicker} ilsRate={ilsRate} />
 
         {/* Table */}
         <div className="overflow-x-auto rounded-2xl border border-slate-700 bg-slate-800 shadow-xl shadow-black/25">

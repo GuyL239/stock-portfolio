@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  Bar,
-  BarChart,
   Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -13,13 +13,30 @@ import {
   YAxis,
 } from "recharts";
 
-type BarShapeProps = {
-  x?: number;
-  y?: number;
-  width?: number;
-  height?: number;
-  payload?: { changePercent: number };
+type LineDotProps = {
+  cx?: number;
+  cy?: number;
+  payload?: { ticker: string; changePercent: number };
 };
+
+const SECTOR_NAME_HE: Record<string, string> = {
+  XLK: "טכנולוגיה",
+  XLF: "פיננסים",
+  XLV: "בריאות",
+  XLE: "אנרגיה",
+  XLY: "צריכה מחזורית",
+  XLP: "צריכה בסיסית",
+  XLI: "תעשייה",
+  XLB: "חומרי גלם",
+  XLRE: "נדל״ן",
+  XLU: "תשתיות",
+  XLC: "תקשורת",
+};
+
+function formatSectorLabel(ticker: string): string {
+  const name = SECTOR_NAME_HE[ticker];
+  return name ? `${name} (${ticker})` : ticker;
+}
 
 type AnalyticsPosition = {
   ticker: string;
@@ -141,7 +158,7 @@ export default function AnalyticsDashboard({
                   cy="50%"
                   outerRadius={95}
                   isAnimationActive={false}
-                  label={(entry) => entry.name}
+                  label={false}
                 />
                 <Tooltip
                   formatter={(value) => `$${money(Number(value))}`}
@@ -149,7 +166,12 @@ export default function AnalyticsDashboard({
                   itemStyle={tooltipItemStyle}
                   labelStyle={tooltipLabelStyle}
                 />
-                <Legend wrapperStyle={{ fontSize: 12, color: "#94a3b8" }} />
+                <Legend
+                  verticalAlign="bottom"
+                  align="center"
+                  iconType="circle"
+                  wrapperStyle={{ fontSize: 12, color: "#94a3b8", paddingTop: 12 }}
+                />
               </PieChart>
             </ResponsiveContainer>
           )}
@@ -178,10 +200,20 @@ export default function AnalyticsDashboard({
             <div className="flex h-72 items-center justify-center text-sm text-slate-500">טוען נתונים...</div>
           ) : (
             <ResponsiveContainer width="100%" height={288}>
-              <BarChart data={sectorPerf} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
-                <XAxis dataKey="ticker" tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={{ stroke: "#334155" }} tickLine={false} />
+              <LineChart data={sectorPerf} margin={{ top: 8, right: 8, left: 8, bottom: 45 }}>
+                <XAxis
+                  dataKey="ticker"
+                  tickFormatter={formatSectorLabel}
+                  tick={{ fill: "#94a3b8", fontSize: 10 }}
+                  axisLine={{ stroke: "#334155" }}
+                  tickLine={false}
+                  interval={0}
+                  angle={-40}
+                  textAnchor="end"
+                />
                 <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={{ stroke: "#334155" }} tickLine={false} unit="%" />
                 <Tooltip
+                  labelFormatter={(label) => formatSectorLabel(String(label))}
                   formatter={(value) => {
                     const num = Number(value);
                     return `${num >= 0 ? "+" : ""}${num.toFixed(2)}%`;
@@ -190,19 +222,30 @@ export default function AnalyticsDashboard({
                   itemStyle={tooltipItemStyle}
                   labelStyle={tooltipLabelStyle}
                 />
-                <Bar
+                <Line
+                  type="monotone"
                   dataKey="changePercent"
+                  stroke="#60a5fa"
+                  strokeWidth={2}
                   isAnimationActive={false}
-                  shape={(props: BarShapeProps) => {
-                    const { x = 0, y = 0, width = 0, height = 0, payload } = props;
+                  activeDot={{ r: 6 }}
+                  dot={(props: LineDotProps) => {
+                    const { cx = 0, cy = 0, payload } = props;
                     const fill = (payload?.changePercent ?? 0) >= 0 ? "#34d399" : "#f87171";
-                    // height can be negative for below-baseline (negative %) bars; normalize to a valid rect.
-                    const rectY = height < 0 ? y + height : y;
-                    const rectHeight = Math.abs(height);
-                    return <rect x={x} y={rectY} width={width} height={rectHeight} fill={fill} rx={4} />;
+                    return (
+                      <circle
+                        key={payload?.ticker}
+                        cx={cx}
+                        cy={cy}
+                        r={4}
+                        fill={fill}
+                        stroke="#0f172a"
+                        strokeWidth={1}
+                      />
+                    );
                   }}
                 />
-              </BarChart>
+              </LineChart>
             </ResponsiveContainer>
           )}
         </div>
