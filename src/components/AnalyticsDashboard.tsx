@@ -51,6 +51,31 @@ type SectorSeriesPoint = {
   [ticker: string]: number | string;
 };
 
+type HistoryCurrency = "usd" | "ils";
+
+type PortfolioSnapshot = {
+  id: string;
+  total_usd: number;
+  total_ils: number;
+  snapshot_date: string;
+};
+
+type PortfolioSnapshotRow = {
+  id: string;
+  total_usd: number | string;
+  total_ils: number | string;
+  snapshot_date: string;
+};
+
+function mapSnapshotRow(row: PortfolioSnapshotRow): PortfolioSnapshot {
+  return {
+    id: row.id,
+    total_usd: Number(row.total_usd),
+    total_ils: Number(row.total_ils),
+    snapshot_date: row.snapshot_date,
+  };
+}
+
 const TIMEFRAME_OPTIONS: { key: Timeframe; label: string }[] = [
   { key: "1D", label: "יומי" },
   { key: "1W", label: "שבועי" },
@@ -89,6 +114,12 @@ function formatDateTick(dateStr: string, timeframe: Timeframe): string {
   return d.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit" });
 }
 
+function formatSnapshotDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "2-digit" });
+}
+
 const tooltipContentStyle = { backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: 8 };
 const tooltipItemStyle = { color: "#f1f5f9" };
 const tooltipLabelStyle = { color: "#94a3b8" };
@@ -107,6 +138,35 @@ export default function AnalyticsDashboard({
   const [isLoadingSectors, setIsLoadingSectors] = useState(true);
   const [sectorError, setSectorError] = useState("");
   const [selectedSectors, setSelectedSectors] = useState<string[]>(ALL_SECTOR_TICKERS);
+
+  const [history, setHistory] = useState<PortfolioSnapshot[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [historyError, setHistoryError] = useState("");
+  const [historyCurrency, setHistoryCurrency] = useState<HistoryCurrency>("usd");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadHistory() {
+      setIsLoadingHistory(true);
+      setHistoryError("");
+      try {
+        const res = await fetch("/api/portfolio-history");
+        if (!res.ok) throw new Error("שגיאה בקבלת היסטוריית תיק");
+        const data: PortfolioSnapshotRow[] = await res.json();
+        if (!cancelled) setHistory(data.map(mapSnapshotRow));
+      } catch (err) {
+        if (!cancelled) setHistoryError(err instanceof Error ? err.message : "שגיאה בטעינת היסטוריית תיק");
+      } finally {
+        if (!cancelled) setIsLoadingHistory(false);
+      }
+    }
+
+    loadHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -281,6 +341,78 @@ export default function AnalyticsDashboard({
             </ResponsiveContainer>
           )}
         </div>
+      </div>
+
+      {/* Portfolio value history */}
+      <div className="rounded-2xl border border-slate-700 bg-slate-800 p-5 shadow-xl shadow-black/25">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-[15px] font-semibold text-white">ביצועי תיק היסטוריים</div>
+          <div className="flex gap-1.5 rounded-xl border border-slate-700 bg-slate-900/50 p-1">
+            <button
+              onClick={() => setHistoryCurrency("usd")}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                historyCurrency === "usd" ? "bg-emerald-400 text-slate-900" : "text-slate-400 hover:text-slate-100"
+              }`}
+            >
+              $
+            </button>
+            <button
+              onClick={() => setHistoryCurrency("ils")}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                historyCurrency === "ils" ? "bg-emerald-400 text-slate-900" : "text-slate-400 hover:text-slate-100"
+              }`}
+            >
+              ₪
+            </button>
+          </div>
+        </div>
+
+        {historyError && <div className="mb-3 text-[13px] text-red-400">{historyError}</div>}
+        {isLoadingHistory ? (
+          <div className="flex h-72 items-center justify-center text-sm text-slate-500">טוען נתונים...</div>
+        ) : history.length === 0 ? (
+          <div className="flex h-72 items-center justify-center text-sm text-slate-500">
+            אין עדיין נתוני היסטוריה
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={288}>
+            <LineChart data={history} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+              <XAxis
+                dataKey="snapshot_date"
+                tickFormatter={(value) => formatSnapshotDate(String(value))}
+                tick={{ fill: "#94a3b8", fontSize: 11 }}
+                axisLine={{ stroke: "#334155" }}
+                tickLine={false}
+                minTickGap={30}
+              />
+              <YAxis
+                tick={{ fill: "#94a3b8", fontSize: 11 }}
+                axisLine={{ stroke: "#334155" }}
+                tickLine={false}
+                tickFormatter={(val) => (historyCurrency === "usd" ? `$${val}` : `₪${val}`)}
+              />
+              <Tooltip
+                labelFormatter={(label) => formatSnapshotDate(String(label))}
+                formatter={(value) => {
+                  const num = Number(value);
+                  return historyCurrency === "usd" ? `$${money(num)}` : `₪${money(num)}`;
+                }}
+                contentStyle={tooltipContentStyle}
+                itemStyle={tooltipItemStyle}
+                labelStyle={tooltipLabelStyle}
+              />
+              <Line
+                type="monotone"
+                dataKey={historyCurrency === "usd" ? "total_usd" : "total_ils"}
+                name={historyCurrency === "usd" ? "שווי תיק ($)" : "שווי תיק (₪)"}
+                stroke={historyCurrency === "usd" ? "#34d399" : "#60a5fa"}
+                strokeWidth={2}
+                isAnimationActive={false}
+                dot={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </div>
   );
