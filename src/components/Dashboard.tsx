@@ -793,15 +793,18 @@ export default function Dashboard() {
   };
 
   const realizedPnlTotals = useMemo(() => {
-    let usd = 0;
-    let ils = 0;
+    let totalUsdPnl = 0;
+    let totalIlsPnl = 0;
     trades.forEach((t) => {
       if (t.realized_pnl === null) return;
-      if (isIlsTicker(t.ticker)) ils += t.realized_pnl;
-      else usd += t.realized_pnl;
+      if (isIlsTicker(t.ticker)) totalIlsPnl += t.realized_pnl;
+      else totalUsdPnl += t.realized_pnl;
     });
+
+    const usd = totalUsdPnl + (ilsRate ? totalIlsPnl / ilsRate : 0);
+    const ils = totalIlsPnl + (ilsRate ? totalUsdPnl * ilsRate : 0);
     return { usd, ils };
-  }, [trades]);
+  }, [trades, ilsRate]);
 
   useEffect(() => {
     let cancelled = false;
