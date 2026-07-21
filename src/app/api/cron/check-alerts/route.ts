@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
 
   const { data: positions, error } = await supabase
     .from("positions")
-    .select("id, ticker, stop_loss")
+    .select("id, ticker, shares, avg_price, stop_loss")
     .not("stop_loss", "is", null)
     .eq("stop_loss_alert_sent", false);
 
@@ -73,27 +73,43 @@ export async function GET(request: NextRequest) {
   for (const pos of rows) {
     const ticker = pos.ticker as string;
     const stopLoss = Number(pos.stop_loss);
+    const shares = Number(pos.shares);
+    const buyPrice = Number(pos.avg_price);
 
     const quote = await fetchQuote(ticker);
     if (!quote || typeof quote.regularMarketPrice !== "number") continue;
 
     // TASE quotes come back from Yahoo in Agorot (1/100 ILS); stop_loss for .TA
     // positions is stored in ILS, so convert before comparing.
-    const livePrice = isIlsTicker(ticker) ? quote.regularMarketPrice / 100 : quote.regularMarketPrice;
+    const isIls = isIlsTicker(ticker);
+    const livePrice = isIls ? quote.regularMarketPrice / 100 : quote.regularMarketPrice;
 
     if (livePrice <= stopLoss) {
-      const text = `🚨 התראת סטופ לוס!\nמניית ${ticker} ירדה מתחת ליעד.\nמחיר נוכחי: ${livePrice.toFixed(2)}\nסטופ לוס: ${stopLoss.toFixed(2)}`;
+      const text = `🚨 פוזיציה נסגרה אוטומטית! מניית ${ticker} חצתה את הסטופ לוס (${stopLoss.toFixed(2)}) והוסרה מהתיק הפעיל. מחיר מכירה: ${livePrice.toFixed(2)} הנתונים הועברו להיסטוריית העסקאות.`;
       const sent = await sendTelegramAlert(text);
+      if (!sent) continue;
 
-      if (sent) {
-        const { error: updateError } = await supabase
-          .from("positions")
-          .update({ stop_loss_alert_sent: true })
-          .eq("id", pos.id);
+      // Log the liquidation as a sell trade first — only remove the live position
+      // once we know it's safely reflected in trade_history (and Total Realized P&L).
+      const realizedPnl = (livePrice - buyPrice) * shares;
+      const { error: tradeError } = await supabase.from("trade_history").insert({
+        ticker,
+        action_type: "sell",
+        shares,
+        price_per_share: livePrice,
+        realized_pnl: realizedPnl,
+        trade_date: new Date().toISOString(),
+      });
 
-        if (!updateError) triggered++;
-        else console.error(`Failed to mark alert as sent for ${ticker}:`, updateError.message);
+      if (tradeError) {
+        console.error(`Failed to log liquidation trade for ${ticker}:`, tradeError.message);
+        continue;
       }
+
+      const { error: deleteError } = await supabase.from("positions").delete().eq("id", pos.id);
+
+      if (!deleteError) triggered++;
+      else console.error(`Trade was logged for ${ticker} but failed to delete from positions:`, deleteError.message);
     }
   }
 
